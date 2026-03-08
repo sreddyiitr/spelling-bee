@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Spelling Bee Mastery</title>
+    <style>
+        :root { --honey: #FFC107; --dark: #212529; --bg: #FFFDE7; }
+        body { font-family: 'Segoe UI', sans-serif; max-width: 900px; margin: 20px auto; background: var(--bg); color: var(--dark); text-align: center; }
+        .card { background: white; padding: 25px; border-radius: 15px; border: 3px solid var(--honey); margin-bottom: 20px; box-shadow: 6px 6px 0px var(--honey); }
+        #displayWord { font-size: 4.5em; font-weight: 900; margin: 15px 0; text-transform: capitalize; }
+        .counter { font-size: 1.2em; font-weight: bold; background: #fff9c4; padding: 5px 15px; border-radius: 20px; display: inline-block; }
+        select, textarea { padding: 12px; border-radius: 8px; border: 2px solid #ddd; margin: 5px; }
+        button { padding: 12px 24px; margin: 8px; cursor: pointer; border-radius: 50px; border: 2px solid var(--dark); font-weight: bold; background: white; }
+        .btn-next { background: var(--honey); width: 250px; font-size: 1.3em; box-shadow: 0 4px 0 var(--dark); }
+        .list-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; text-align: left; }
+        .letter-group { margin-bottom: 15px; padding-left: 10px; border-left: 4px solid var(--honey); }
+        .word-tag { background: #f1f1f1; padding: 4px 10px; border-radius: 15px; margin: 3px; display: inline-block; cursor: pointer; border: 1px solid #ccc; font-size: 0.9em; }
+        .word-tag:hover { background: #ffcdd2; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+    <h1>🐝 THE GRAND SPELLING BEE</h1>
+
+    <div id="setup" class="card">
+        <h3>📥 Add Words to Database</h3>
+        <textarea id="wordInput" style="width: 90%;" placeholder="Enter words..."></textarea><br>
+        <button onclick="addWords()">Save to Hive</button>
+        <button onclick="showPractice()" style="background: var(--dark); color: white;">Enter Practice Mode</button>
+    </div>
+
+    <div id="practice" class="card hidden">
+        <div class="controls">
+            <select id="letterSelect" onchange="restartSession()">
+                <option value="all">All Letters (A-Z)</option>
+            </select>
+            <select id="modeSelect" onchange="restartSession()">
+                <option value="all">All Words</option>
+                <option value="incorrect">Incorrect Only</option>
+                <option value="bookmarked">Bookmarks Only</option>
+            </select>
+        </div>
+
+        <div id="sessionCounter" class="counter">0 of 0 words</div>
+        <h2 id="displayWord">---</h2>
+
+        <button onclick="speakCurrent()">🔊 Repeat Word</button>
+        <button onclick="nextWord()" class="btn-next">Next Word</button>
+        
+        <div style="margin-top: 20px;">
+            <button onclick="logAction('wrong')" style="color: #d32f2f;">✗ Mark Wrong</button>
+            <button onclick="logAction('bookmark')" style="color: #f57f17;">⭐ Bookmark</button>
+            <button onclick="restartSession()">🔄 Restart Letter</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="list-grid">
+            <div>
+                <h4 style="border-bottom: 2px solid #f44336; display: flex; justify-content: space-between; align-items: center;">
+                    <span>❌ Incorrect History</span>
+                    <span id="totalWrongBadge" style="background: #f44336; color: white; padding: 2px 10px; border-radius: 10px; font-size: 0.8em; min-width: 20px; text-align: center;">0</span>
+                </h4>
+                <div id="wrongList">None</div>
+            </div>
+
+            <div>
+                <h4 style="border-bottom: 2px solid #f57f17; display: flex; justify-content: space-between; align-items: center;">
+                    <span>⭐ Bookmarked Words</span>
+                </h4>
+                <div id="bookList">None</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentWord = "";
+
+        // Populate Letter Select
+        const ls = document.getElementById('letterSelect');
+        for(let i=65; i<=90; i++) {
+            let char = String.fromCharCode(i);
+            let opt = document.createElement('option');
+            opt.value = char; opt.innerHTML = "Starts with " + char;
+            ls.appendChild(opt);
+        }
+
+        async function addWords() {
+            const input = document.getElementById('wordInput');
+            const words = input.value.split(/[\n,]+/).map(w => w.trim()).filter(w => w);
+            const res = await fetch('/add_words', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({words})
+            });
+            const data = await res.json();
+            alert(data.message);
+            input.value = "";
+            updateStats();
+        }
+
+        function showPractice() {
+            document.getElementById('setup').classList.add('hidden');
+            document.getElementById('practice').classList.remove('hidden');
+            restartSession();
+        }
+
+        async function restartSession() {
+            await fetch('/reset_session', {method: 'POST'});
+            nextWord();
+        }
+
+        async function nextWord() {
+            const letter = document.getElementById('letterSelect').value;
+            const mode = document.getElementById('modeSelect').value;
+            const res = await fetch(`/get_next?letter=${letter}&mode=${mode}`);
+            const data = await res.json();
+            
+            if (!data.word) {
+                document.getElementById('displayWord').innerText = "No words to practice.";
+                document.getElementById('sessionCounter').innerText = `${data.total} of ${data.total}`;
+                currentWord = "";
+                return;
+            }
+            currentWord = data.word;
+            document.getElementById('displayWord').innerText = currentWord;
+            document.getElementById('sessionCounter').innerText = `${data.current_index} of ${data.total}`;
+            speakCurrent();
+        }
+
+        function speakCurrent() {
+            if (!currentWord) return;
+            fetch('/speak', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({word: currentWord}) });
+        }
+
+        async function logAction(action) {
+            if (!currentWord) return;
+            await fetch('/update_status', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({word: currentWord, action}) });
+            updateStats();
+        }
+
+        async function removeFromList(word, type) {
+            const action = type === 'wrong' ? 'clear_wrong' : 'clear_bookmark';
+            await fetch('/update_status', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({word, action}) });
+            updateStats();
+        }
+
+        async function updateStats() {
+    const res = await fetch('/stats');
+    const data = await res.json();
+    
+    // Update the unique wrong counter badge
+    document.getElementById('totalWrongBadge').innerText = data.unique_wrong_count;
+
+    renderList(data.incorrect, 'wrongList', 'wrong');
+    renderList(data.bookmarks, 'bookList', 'bookmark');
+}
+
+        function renderList(words, id, type) {
+            const container = document.getElementById(id);
+            container.innerHTML = "";
+            if (words.length === 0) { container.innerHTML = "None"; return; }
+            const groups = {};
+            words.forEach(w => {
+                const initial = w[0].toUpperCase();
+                if (!groups[initial]) groups[initial] = [];
+                groups[initial].push(w);
+            });
+            for (const L in groups) {
+                const div = document.createElement('div');
+                div.className = 'letter-group';
+                div.innerHTML = `<strong>${L}</strong>: ` + groups[L].map(word => 
+                    `<span class="word-tag" onclick="removeFromList('${word}', '${type}')">${word} ✕</span>`
+                ).join('');
+                container.appendChild(div);
+            }
+        }
+        updateStats();
+    </script>
+</body>
+</html>
